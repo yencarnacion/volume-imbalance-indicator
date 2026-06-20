@@ -1,0 +1,132 @@
+Use your expert Sierra Chart ACSIL, Bookmap, order-flow, tape-reading, and discretionary day-trading knowledge.
+
+I am trying to design and implement a better real-time indicator for spotting potential turns after fast directional flushes, especially downward flushes that may be exhausting and starting to reverse.
+
+Local files and context:
+
+- `trading-screen.png` is a screenshot of my current trading layout.
+- `volume-imbalance-bookmap.png` shows the Bookmap reference. In the upper-right area, Bookmap displays Order Book imbalance and Volume imbalance. The Volume imbalance is the specific visual idea I had in mind.
+- `Yamirindicators.cpp` contains my current Sierra Chart ACSIL studies.
+
+My current useful indicators:
+
+- Volume Delta Indicator: uses ask volume minus bid volume.
+- Custom Pace of Tape Reader: compares recent number of trades against the prior lookback period.
+- Custom Price Change Tape Reader: shows price change over the lookback period.
+
+How I currently use them:
+
+- After a downward flush, I look for evidence that selling pressure is no longer pushing price lower.
+- I like to see positive numbers on pace of tape and positive numbers on price.
+- Ideally volume delta also turns positive, but sometimes price and pace flip before delta confirms.
+- I use this together with Bookmap context: order book imbalance, volume imbalance, cumulative volume delta, volume dots, and price action.
+
+Goal:
+
+Help me design a new Sierra Chart ACSIL indicator that improves on my current setup for U.S. equities. My initial idea is a Bookmap-style volume imbalance indicator that shows multiple rolling time windows at the same time:
+
+- Last 5 minutes
+- Last 3 minutes
+- Last 1 minute
+
+However, do not build only a direct Bookmap-style volume imbalance clone. Version 1 should include a multi-horizon flush-reversal / absorption score immediately, because that is more directly aligned with how I trade turns after flushes. The score should combine:
+
+- Rolling volume imbalance
+- Price response
+- Pace of tape acceleration
+- Volume delta
+- Optional order book imbalance, if Sierra Chart market depth data makes that practical
+
+Important trading concept to evaluate:
+
+For catching turns after a downward flush, the important signal may not be simply "buyers are stronger than sellers." It may be:
+
+- Heavy selling volume appears, but price stops making efficient downside progress.
+- Bid-side aggression remains high, but price holds, upticks, or reclaims levels.
+- Pace stays active or accelerates while price response flips upward.
+- Shorter windows, especially 1 minute, improve before 3-minute and 5-minute windows.
+- Delta may still be negative, but the relationship between delta and price becomes bullish.
+
+Please explain the tradeoff between these two design paths, then implement the second path while still exposing the raw values from the first path:
+
+1. Direct multi-window volume imbalance
+   - Compute rolling ask volume and bid volume for 1, 3, and 5 minutes.
+   - Imbalance formula should be explicit, for example:
+     `imbalancePct = 100.0 * (askVolume - bidVolume) / max(askVolume + bidVolume, 1)`
+   - Positive values mean buyer-initiated volume dominance.
+   - Negative values mean seller-initiated volume dominance.
+   - Display the three windows simultaneously.
+
+2. Multi-horizon flush reversal / absorption score, which should be included in the first implementation
+   - Start with the same 1, 3, and 5 minute volume imbalance values.
+   - Add price-change-over-window in ticks or dollars.
+   - Add pace-of-tape change or trade-count acceleration.
+   - Add volume delta over each window.
+   - Detect bullish absorption after a down move, for example:
+     - Price change over the longer window is negative or recently made a flush low.
+     - Short-window price change turns positive or stops falling.
+     - Volume imbalance or delta is improving from very negative toward less negative or positive.
+     - Pace remains elevated or increases, showing active participation.
+   - Output a readable score or state such as:
+     - Strong sell pressure
+     - Sell pressure weakening
+     - Bullish absorption
+     - Bullish reversal pressure
+     - Neutral
+     - Bearish mirror conditions
+
+Implementation requirements:
+
+- Use Sierra Chart ACSIL in `Yamirindicators.cpp`.
+- Add a new study function rather than replacing my existing studies unless there is a clear reason.
+- Preserve the current indicators.
+- Use robust time-based rolling windows rather than assuming a fixed number of bars, because I may run this on 5-second, 1-second, or other intraday charts.
+- Update in real time on every trade when practical.
+- Use Sierra Chart bid/ask trade volume data where available, such as `SC_ASKVOL` and `SC_BIDVOL`, for volume delta and volume imbalance.
+- Make all important parameters configurable through study inputs:
+  - Window lengths, default 60, 180, and 300 seconds.
+  - Minimum total volume threshold.
+  - Minimum trade count or pace threshold.
+  - Whether to display raw imbalance, composite score, or both. Default should be both.
+  - Alert thresholds, if alerts are added.
+- Include defensive handling for zero volume, early bars, missing bid/ask data, and insufficient history.
+- Keep the display compact enough to fit my current Sierra Chart bottom-middle area.
+- Design for equities first. Do not optimize for futures-specific assumptions in version 1.
+
+Display requirement:
+
+- Use a hybrid display: real-time text plus compact visual elements.
+- Text is important because I watch live numerical fluctuations as part of the signal, not just static or hard-to-interpret shapes.
+- Add real-time text readouts for the latest values, for example:
+  `Abs +72 | VI 1m +32 | 3m +14 | 5m -8 | Pace +41 | Px +0.08`
+- Add visual elements similar in spirit to my current bottom-middle indicators:
+  - Three compact bars or histograms, one each for 1m, 3m, and 5m imbalance.
+  - A separate score bar, line, or histogram for the composite absorption/reversal score.
+  - Optional visual state coloring for bullish absorption, bearish pressure, and neutral.
+- Color values blue/cyan or green for positive buyer imbalance and red for negative seller imbalance, consistent with my current indicators.
+- Show a separate value or state label such as:
+  `Absorption +72` or `Bullish absorption`
+- A zero line should be visible if using bar/histogram output.
+
+Code quality requirements:
+
+- Explain any ACSIL functions or data arrays used.
+- Avoid look-ahead bias.
+- Make the calculations stable during live updates and historical recalculation.
+- Keep the code readable and easy for me to modify.
+- If there are issues in my existing studies that affect reliability, call them out. For example, check whether the current pace-of-tape study can read before the beginning of the chart when `sc.Index` is less than `2 * LookbackPeriod`.
+- Provide the full ACSIL code changes or a patch-style answer.
+- Include instructions for compiling the Sierra Chart custom study DLL.
+
+Before coding, ask me any clarifying questions that would materially change the design. Useful questions include:
+
+- I am trading equities for now. Should any assumptions change for high-volume equities like NVDA versus lower-volume equities?
+- Should the windows be based only on real elapsed time, or should fixed bar count be offered as a fallback option?
+- The first version should include the composite flush-reversal/absorption score immediately. What formula do you recommend and why?
+- The output should be both a lower-panel visual display and live text readouts. What exact layout will work best in my current chart area?
+- Do I have Sierra Chart market depth/order book historical data available, or should order book imbalance be left out of version 1?
+- What threshold should count as meaningful imbalance for my style: 10%, 20%, 30%, or adaptive thresholds based on recent distribution?
+
+Recommended approach:
+
+Start with a first version that implements time-based 1m/3m/5m volume imbalance, live text readouts, compact visual bars, and a composite "flush reversal / absorption score." The composite should not hide the raw components; I want to see the underlying 1m/3m/5m imbalance, price change, pace, and delta values so I can build trust in the signal. Prefer the display layout that best supports fast discretionary reading: a clear score/state plus the key fluctuating numbers updating in real time.
