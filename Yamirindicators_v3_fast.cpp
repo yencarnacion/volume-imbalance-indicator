@@ -1712,6 +1712,9 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
     SCSubgraphRef DeltaLong = sc.Subgraph[13];
     SCSubgraphRef CoverageConfidence = sc.Subgraph[14];
     SCSubgraphRef StateCode = sc.Subgraph[15];
+    SCSubgraphRef PacePriceDrive = sc.Subgraph[16];
+    SCSubgraphRef PaceUpIntensity = sc.Subgraph[17];
+    SCSubgraphRef PriceDriveIntensity = sc.Subgraph[18];
 
     SCInputRef InputShortSeconds = sc.Input[0];
     SCInputRef InputMediumSeconds = sc.Input[1];
@@ -1739,6 +1742,8 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
     SCInputRef InputAlertThreshold = sc.Input[23];
     SCInputRef InputAlertNumber = sc.Input[24];
     SCInputRef InputAlertCooldownSeconds = sc.Input[25];
+    SCInputRef InputFullDrivePaceAccelerationPct = sc.Input[26];
+    SCInputRef InputMinimumPriceDriveIntensityPct = sc.Input[27];
 
     if (sc.SetDefaults)
     {
@@ -1822,6 +1827,12 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
         CoverageConfidence.DrawStyle = DRAWSTYLE_IGNORE;
         StateCode.Name = "Fast State Code";
         StateCode.DrawStyle = DRAWSTYLE_IGNORE;
+        PacePriceDrive.Name = "Fast Pace-Price Drive Score";
+        PacePriceDrive.DrawStyle = DRAWSTYLE_IGNORE;
+        PaceUpIntensity.Name = "Fast Pace Up Intensity Percent";
+        PaceUpIntensity.DrawStyle = DRAWSTYLE_IGNORE;
+        PriceDriveIntensity.Name = "Fast Price Drive Intensity Percent";
+        PriceDriveIntensity.DrawStyle = DRAWSTYLE_IGNORE;
 
         InputShortSeconds.Name = "Short Window Seconds";
         InputShortSeconds.SetInt(20);
@@ -1923,6 +1934,14 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
         InputAlertCooldownSeconds.SetInt(20);
         InputAlertCooldownSeconds.SetIntLimits(0, 3600);
 
+        InputFullDrivePaceAccelerationPct.Name = "Pace Acceleration Percent For Full Drive";
+        InputFullDrivePaceAccelerationPct.SetFloat(50.0f);
+        InputFullDrivePaceAccelerationPct.SetFloatLimits(5.0f, 500.0f);
+
+        InputMinimumPriceDriveIntensityPct.Name = "Minimum Price Intensity Percent For Drive";
+        InputMinimumPriceDriveIntensityPct.SetFloat(10.0f);
+        InputMinimumPriceDriveIntensityPct.SetFloatLimits(0.0f, 100.0f);
+
         return;
     }
 
@@ -1973,6 +1992,9 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
             DeltaLong[sc.Index] = 0.0f;
             CoverageConfidence[sc.Index] = 0.0f;
             StateCode[sc.Index] = 0.0f;
+            PacePriceDrive[sc.Index] = 0.0f;
+            PaceUpIntensity[sc.Index] = 0.0f;
+            PriceDriveIntensity[sc.Index] = 0.0f;
             return;
         }
     }
@@ -2233,6 +2255,35 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
         >= InputMinimumStartupSeconds.GetInt()
         && Short.HasBidAskData;
 
+    const double FullDrivePaceAccelerationPct = YI_Max(
+        InputFullDrivePaceAccelerationPct.GetFloat(),
+        1.0);
+    const double MinimumPriceDriveIntensity = YI_Clamp(
+        InputMinimumPriceDriveIntensityPct.GetFloat() / 100.0,
+        0.0,
+        1.0);
+
+    const double PaceUpIntensityValue = Metrics.PreviousShortReady
+        ? YI_Clamp(
+            Metrics.PaceAccelerationPct / FullDrivePaceAccelerationPct,
+            0.0,
+            1.0)
+        : 0.0;
+    const double SignedPriceDriveIntensity = PriceNormShort;
+    const double AbsolutePriceDriveIntensity = YI_Abs(SignedPriceDriveIntensity);
+
+    double PacePriceDriveScore = 0.0;
+    if (ReadyToScore
+        && PaceUpIntensityValue > 0.0
+        && AbsolutePriceDriveIntensity >= MinimumPriceDriveIntensity)
+    {
+        const double CombinedDriveIntensity = 100.0
+            * sqrt(PaceUpIntensityValue * AbsolutePriceDriveIntensity);
+        PacePriceDriveScore = SignedPriceDriveIntensity >= 0.0
+            ? CombinedDriveIntensity
+            : -CombinedDriveIntensity;
+    }
+
     double CompositeScore = 0.0;
     if (ReadyToScore)
     {
@@ -2344,11 +2395,17 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
     DeltaLong[sc.Index] = static_cast<float>(Long.Delta);
     CoverageConfidence[sc.Index] = static_cast<float>(100.0 * Readiness);
     StateCode[sc.Index] = static_cast<float>(CurrentStateCode);
+    PacePriceDrive[sc.Index] = static_cast<float>(PacePriceDriveScore);
+    PaceUpIntensity[sc.Index] = static_cast<float>(100.0 * PaceUpIntensityValue);
+    PriceDriveIntensity[sc.Index] = static_cast<float>(
+        100.0 * SignedPriceDriveIntensity);
 
     const unsigned int PositiveColor = RGB(0, 200, 255);
     const unsigned int BullishStateColor = RGB(0, 220, 125);
     const unsigned int NegativeColor = RGB(255, 65, 65);
     const unsigned int NeutralColor = RGB(185, 190, 195);
+    const unsigned int DriveUpColor = RGB(0, 220, 125);
+    const unsigned int DriveDownColor = RGB(255, 65, 65);
 
     if (CompositeScore > 0.5)
         Score.DataColor[sc.Index] = CurrentStateCode >= 3 ? BullishStateColor : PositiveColor;
@@ -2408,11 +2465,35 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
         else
             PaceText = "--";
 
+        const char* DriveText = "NONE";
+        if (!ReadyToScore || !Metrics.PreviousShortReady)
+        {
+            DriveText = "WAIT";
+        }
+        else if (PaceUpIntensityValue <= 0.0)
+        {
+            DriveText = "PACE SLOW";
+        }
+        else if (SignedPriceDriveIntensity >= MinimumPriceDriveIntensity)
+        {
+            DriveText = "UP";
+        }
+        else if (SignedPriceDriveIntensity <= -MinimumPriceDriveIntensity)
+        {
+            DriveText = "DOWN";
+        }
+        else
+        {
+            DriveText = "PRICE FLAT";
+        }
+
         SCString Text;
         Text.Format(
-            "Abs %+.0f | %s | %s\n"
+            "Drive %s %.0f | Abs %+.0f | %s | %s\n"
             "VI %s %+.0f | %s %+.0f | %s %+.0f | Pace %s\n"
-            "Px %+.2f / %+.2f / %+.2f | D %s / %s / %s",
+            "PxI %+.0f | Px %+.2f / %+.2f / %+.2f | D %s / %s / %s",
+            DriveText,
+            YI_Abs(PacePriceDriveScore),
             CompositeScore,
             PhaseText.GetChars(),
             StateText,
@@ -2423,6 +2504,7 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
             LongLabel.GetChars(),
             Long.ImbalancePct,
             PaceText.GetChars(),
+            100.0 * SignedPriceDriveIntensity,
             Short.PriceChange,
             Medium.PriceChange,
             Long.PriceChange,
@@ -2431,7 +2513,11 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
             DeltaLongText.GetChars());
 
         unsigned int TextColor = NeutralColor;
-        if (CurrentStateCode >= 3)
+        if (PacePriceDriveScore > 0.5)
+            TextColor = DriveUpColor;
+        else if (PacePriceDriveScore < -0.5)
+            TextColor = DriveDownColor;
+        else if (CurrentStateCode >= 3)
             TextColor = BullishStateColor;
         else if (CompositeScore > 0.5)
             TextColor = PositiveColor;
@@ -2452,6 +2538,9 @@ SCSFExport scsf_FastScalpFlushReversalAbsorption(SCStudyInterfaceRef sc)
             const int GaugeCenterX = InputGaugeCenterX.GetInt();
             const int GaugeHalfWidth = InputGaugeHalfWidth.GetInt();
 
+            YI_DrawGauge(sc, DrawingBase + 5, GaugeCenterX, GaugeHalfWidth,
+                75.0f, 84.0f, PacePriceDriveScore,
+                DriveUpColor, DriveDownColor, NeutralColor);
             YI_DrawGauge(sc, DrawingBase + 10, GaugeCenterX, GaugeHalfWidth,
                 62.0f, 69.0f, Short.ImbalancePct,
                 PositiveColor, NegativeColor, NeutralColor);

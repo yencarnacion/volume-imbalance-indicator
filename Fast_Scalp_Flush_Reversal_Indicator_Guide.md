@@ -236,6 +236,8 @@ Use these initial values:
 | Show Historical VI Lines | No |
 | Show Compact Gauges | Yes |
 | Enable Score Alerts | No |
+| Pace Acceleration Percent For Full Drive | 50 |
+| Minimum Price Intensity Percent For Drive | 10 |
 
 ## Why the first opening bar is excluded
 
@@ -561,10 +563,30 @@ The transition is usually more informative than one isolated positive bar.
 A typical reading looks like:
 
 ```text
-Abs -34 | LIVE | Neutral
+Drive DOWN 8 | Abs -34 | LIVE | Neutral
 VI 20s -9 | 1m -4 | 2m -5 | Pace +2%
-Px -0.14 / -2.00 / -1.03 | D -3.5K / -2.9K / -6.5K
+PxI -12 | Px -0.14 / -2.00 / -1.03 | D -3.5K / -2.9K / -6.5K
 ```
+
+## `Drive DOWN 8`
+
+`Drive` is the quick pace-plus-price read.
+
+- `UP` means pace is accelerating and short-window price is moving up.
+- `DOWN` means pace is accelerating and short-window price is moving down.
+- `PRICE FLAT` means pace is accelerating, but price movement is too small to classify.
+- `PACE SLOW` means the current trade rate is not faster than the previous short window.
+- `WAIT` means there is not enough prior-window data yet.
+
+The number is the combined intensity from 0 to 100. It gets large only when both components are large:
+
+```text
+pace-up intensity
++ price-move intensity
+= drive intensity
+```
+
+The calculation uses a geometric mean, so one strong component cannot fully compensate for the other being weak.
 
 ## `Abs -34`
 
@@ -641,6 +663,27 @@ Pace compares the current 20-second trade rate with the previous 20-second trade
 Pace has no direction by itself. Faster trading can be aggressively bullish or aggressively bearish.
 
 Use price, VI, and delta to determine direction.
+
+`Drive` handles this pairing directly:
+
+```text
+Pace positive + Price intensity positive = Drive UP
+Pace positive + Price intensity negative = Drive DOWN
+```
+
+The pace intensity reaches 100 when pace acceleration reaches the input **Pace Acceleration Percent For Full Drive**. The default is `50`, so `Pace +50%` is treated as full pace-up intensity.
+
+## `PxI -12`
+
+`PxI` means normalized short-window price intensity.
+
+It compares the 20-second price change against the expected short-window move used by the indicator. This makes a price move more comparable across symbols and volatility regimes.
+
+- `+100` means price moved up about one full expected short-window move or more.
+- `-100` means price moved down about one full expected short-window move or more.
+- `+10` or `-10` is small.
+
+The input **Minimum Price Intensity Percent For Drive** controls how much normalized price movement is required before `Drive` can show `UP` or `DOWN`. The default is `10`.
 
 ## `Px -0.14 / -2.00 / -1.03`
 
@@ -751,6 +794,15 @@ Active or accelerating pace
 
 Falling pace can still produce a bounce, but it may indicate that the move is simply going quiet rather than being actively absorbed.
 
+For a faster at-a-glance read, use `Drive`:
+
+```text
+Drive UP    = accelerating participation with upward price response
+Drive DOWN  = accelerating participation with downward price response
+```
+
+The intensity number separates a small coordinated move from a strong coordinated move.
+
 ## Step 6: Watch the score and state
 
 Default thresholds:
@@ -793,7 +845,7 @@ Possible bearish labels include:
 - Bearish absorption
 - Bearish reversal pressure
 
-The four gauges work the same way: left/red is negative and right/cyan or green is positive.
+The gauges work the same way: left/red is negative and right/cyan or green is positive. The top gauge is the pace-price `Drive`; the lower gauges show short, medium, long, and composite readings.
 
 ---
 
@@ -802,14 +854,15 @@ The four gauges work the same way: left/red is negative and right/cyan or green 
 Example display:
 
 ```text
-Abs -34 | LIVE | Neutral
+Drive DOWN 8 | Abs -34 | LIVE | Neutral
 VI 20s -9 | 1m -4 | 2m -5 | Pace +2%
-Px -0.14 / -2.00 / -1.03 | D -3.5K / -2.9K / -6.5K
+PxI -12 | Px -0.14 / -2.00 / -1.03 | D -3.5K / -2.9K / -6.5K
 ```
 
 Interpretation:
 
 - All three windows are active because the phase says `LIVE`.
+- `Drive DOWN 8` says pace is only slightly faster while normalized short-window price response is down, so the coordinated downside drive is weak.
 - VI is slightly negative across all three windows.
 - Sellers have a small aggression advantage, but not an extreme one.
 - Price is negative across all three windows.
@@ -928,13 +981,14 @@ After a downward flush, look for:
 
 1. The 1-minute or 2-minute price change remains negative.
 2. The 20-second price change stops falling or turns positive.
-3. The top 20-second VI gauge improves first.
-4. Pace remains active or accelerates.
-5. Delta may remain negative, but price stops responding downward.
-6. Red histogram bars shorten toward zero.
-7. The score moves above `+35`.
-8. The label changes to `Sell pressure weakening`, `Bullish absorption`, or `Bullish reversal pressure`.
-9. Price confirms by holding or reclaiming a meaningful level.
+3. `Drive UP` appears or `Drive DOWN` weakens sharply.
+4. The short 20-second VI gauge improves first.
+5. Pace remains active or accelerates.
+6. Delta may remain negative, but price stops responding downward.
+7. Red histogram bars shorten toward zero.
+8. The score moves above `+35`.
+9. The label changes to `Sell pressure weakening`, `Bullish absorption`, or `Bullish reversal pressure`.
+10. Price confirms by holding or reclaiming a meaningful level.
 
 Avoid acting only because one bar turns cyan or because the score briefly crosses a threshold.
 
